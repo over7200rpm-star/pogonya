@@ -1,0 +1,10 @@
+{
+  "appId": "com.pogonya.ryazan",
+  "appName": "Погоня в Рязани",
+  "webDir": "www",
+  "ios": {
+    "contentInset": "never",
+    "backgroundColor": "#17251c",
+    "scrollEnabled": false
+  }
+}
