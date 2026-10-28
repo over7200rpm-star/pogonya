@@ -1,0 +1,105 @@
+name: Build IPA
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+
+jobs:
+  build:
+    name: Build unsigned App.ipa
+    runs-on: macos-26
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - name: Select Xcode 26
+        run: |
+          if [ -d /Applications/Xcode_26.6.app ]; then
+            XCODE=/Applications/Xcode_26.6.app
+          else
+            XCODE=$(ls -d /Applications/Xcode_26*.app | sort -V | tail -n 1)
+          fi
+          echo "Using $XCODE"
+          sudo xcode-select -s "$XCODE/Contents/Developer"
+          xcodebuild -version
+
+      - name: Install npm packages
+        run: npm install
+
+      - name: Add iOS platform (only if there is no ios folder)
+        run: |
+          if [ ! -d ios ]; then
+            npx cap add ios
+          fi
+
+      - name: Sync web files into iOS project
+        run: npx cap sync ios
+
+      - name: Resolve Swift packages (3 attempts)
+        run: |
+          for i in 1 2 3; do
+            xcodebuild -resolvePackageDependencies -project ios/App/App.xcodeproj -scheme App && exit 0
+            echo "Attempt $i failed, retrying in 10 seconds..."
+            sleep 10
+          done
+          exit 1
+
+      - name: Build unsigned app (xcodebuild)
+        run: |
+          set -o pipefail
+          xcodebuild build \
+            -project ios/App/App.xcodeproj \
+            -scheme App \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            DEVELOPMENT_TEAM="" 2>&1 | tee xcodebuild.log
+
+      - name: Package App.ipa
+        run: |
+          APP="build/Build/Products/Release-iphoneos/App.app"
+          if [ ! -d "$APP" ]; then
+            echo "App.app not found. Contents of build products:"
+            find build/Build/Products -maxdepth 3 || true
+            exit 1
+          fi
+          rm -rf Payload App.ipa
+          mkdir Payload
+          cp -R "$APP" Payload/App.app
+          zip -qry App.ipa Payload
+          echo "--- Info.plist ---"
+          plutil -p Payload/App.app/Info.plist | grep -E "Identifier|DisplayName" || true
+          echo "--- binary ---"
+          file Payload/App.app/App
+          echo "--- game file ---"
+          ls -l Payload/App.app/public/index.html
+          echo "--- ipa ---"
+          ls -l App.ipa
+
+      - name: Upload App.ipa
+        uses: actions/upload-artifact@v7
+        with:
+          name: App-ipa
+          path: App.ipa
+          if-no-files-found: error
+          compression-level: 0
+
+      - name: Upload build log (if something failed)
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: build-log
+          path: xcodebuild.log
+          if-no-files-found: ignore
