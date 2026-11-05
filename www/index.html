@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"><meta name="theme-color" content="#17251c"><title>Погоня в Рязани — версия 4.2</title>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"><meta name="theme-color" content="#17251c"><title>Погоня в Рязани — версия 4.3</title>
 <style>
 *{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;touch-action:none;background:#17251c;color:#fff;font-family:system-ui,-apple-system,BlinkMacSystemFont,sans-serif}canvas{display:block;width:100vw;height:100dvh}
 #hud{position:fixed;inset:0;pointer-events:none}#top{position:absolute;top:max(8px,env(safe-area-inset-top));left:8px;right:8px;display:flex;justify-content:space-between;align-items:flex-start;gap:7px}
@@ -135,7 +135,7 @@ body.playing #joyZone{pointer-events:auto}
 <div id="toast"></div>
 <div id="pauseOverlay" role="dialog" aria-modal="true" aria-label="Игра на паузе"><div class="panel"><h1>ПАУЗА</h1><p>Игра остановлена. Когда будешь готов — продолжай погоню.</p><button class="primary" id="resumeBtn">▶ ПРОДОЛЖИТЬ</button><button class="primary" id="pauseMenuBtn" style="margin-top:8px;background:linear-gradient(#b8c7cc,#65777e)">В МЕНЮ</button></div></div>
 <div id="arrestScene" aria-hidden="true"><div class="arrestCard"><div class="arrestFlash">🚨 ЗАДЕРЖАН! 🚨</div><div class="arrestRoad"><div class="arrestCar">🚓</div><div class="arrestHero">🧍</div></div><div class="arrestText">Подъехала полицейская машина…<br>Тебя увозят в отделение!</div></div></div>
-<div id="overlay"><div class="panel"><img id="heroPortrait" alt="Выбранный герой"><h1>Погоня в Рязани</h1><div id="verTag" style="opacity:.7;font-size:12px;margin:-4px 0 6px">версия 4.2</div>
+<div id="overlay"><div class="panel"><img id="heroPortrait" alt="Выбранный герой"><h1>Погоня в Рязани</h1><div id="verTag" style="opacity:.7;font-size:12px;margin:-4px 0 6px">версия 4.3</div>
 <div style="font-weight:900;margin:10px 0 4px;color:#ffe29a">СЛОЖНОСТЬ</div><div id="difficultySelect" aria-label="Выбор сложности">
 <button type="button" class="diff-card selected" data-difficulty="beginner">НОВИЧОК<small>Менты проще и медленнее реагируют</small></button>
 <button type="button" class="diff-card" data-difficulty="experienced">БЫВАЛЫЙ<small>Уворачиваются и меняют тактику</small></button>
@@ -325,7 +325,25 @@ document.getElementById('bottle').addEventListener('pointerdown',e=>{
  
 });
 document.getElementById('money').addEventListener('pointerdown',e=>{e.preventDefault();e.stopPropagation();if(state!=='play')return;if(cash<=0){toast('Денег нет — собирай купюры',1200);return}cash--;AudioFX.money();cops.forEach(c=>{if(!c.carHit&&!c.defeated)c.stun=Math.max(c.stun||0,3.9)});for(let i=0;i<7;i++)moneyBags.push({x:player.x+Math.random()*50-25,y:player.y+Math.random()*50-25,vx:Math.random()*100-50,vy:Math.random()*100-50,life:2});toast('Копы отвлеклись на деньги',1200)});
-const KEYS={u:0,d:0,l:0,r:0};let copCaps=[],capInv=0;
+const KEYS={u:0,d:0,l:0,r:0};
+/* 4.3: роли ментов: 0 прямой, 1 перехватчик (упреждение), 2 фланговый. Роли иногда меняются. Плюс раздвигание. */
+const COP_SEP=100;
+function copSteer(c,dt,dist,pvx,pvy,cs){
+ if(c.role===undefined){c.role=cops.indexOf(c)%3;c.roleT=8+Math.random()*6;c.side=Math.random()<.5?-1:1;c.lx=c.x;c.ly=c.y;c.stuckT=0;c.directT=0}
+ c.roleT-=dt;if(c.roleT<=0){c.roleT=8+Math.random()*6;const o=cops.find(k=>k!==c&&!k.defeated&&!k.carHit&&k.role!==undefined&&Math.random()<.5);if(o){const r=o.role;o.role=c.role;c.role=r}c.side=Math.random()<.5?-1:1}
+ c.stuckT+=dt;if(c.stuckT>1.5){if(Math.hypot(c.x-c.lx,c.y-c.ly)<25&&dist>110)c.directT=1.5;c.lx=c.x;c.ly=c.y;c.stuckT=0}c.directT=Math.max(0,c.directT-dt);
+ const acc=difficulty==='beginner'?.5:difficulty==='pro'?1:.8;let tx=player.x,ty=player.y;
+ if(c.directT<=0&&dist>120){
+  if(c.role===1){const t=Math.min(1.3,dist/Math.max(60,cs))*acc;tx+=pvx*t;ty+=pvy*t}
+  else if(c.role===2){const pl=Math.hypot(pvx,pvy);let ux,uy;if(pl>20){ux=pvx/pl;uy=pvy/pl}else{ux=(player.x-c.x)/dist;uy=(player.y-c.y)/dist}const off=Math.min(170,dist*.55);tx+=(-uy*c.side)*off+ux*off*.6*acc;ty+=(ux*c.side)*off+uy*off*.6*acc}
+ }
+ tx=Math.max(45,Math.min(world.w-45,tx));ty=Math.max(45,Math.min(world.h-45,ty));
+ let sx=tx-c.x,sy=ty-c.y,sl=Math.hypot(sx,sy)||1;sx/=sl;sy/=sl;
+ let fx=0,fy=0;for(const o of cops){if(o===c||o.defeated||o.carHit)continue;const ox=c.x-o.x,oy=c.y-o.y,d=Math.hypot(ox,oy)||.01;if(d<COP_SEP*1.4){const w=(1-d/(COP_SEP*1.4))*1.8;fx+=ox/d*w;fy+=oy/d*w}}
+ if(boss){const ox=c.x-boss.x,oy=c.y-boss.y,d=Math.hypot(ox,oy)||.01;if(d<120){const w=(1-d/120)*1.2;fx+=ox/d*w;fy+=oy/d*w}}
+ let vx=sx+fx,vy=sy+fy,vl=Math.hypot(vx,vy)||1;return{x:vx/vl,y:vy/vl}}
+function copSeparate(){const act=cops.filter(c=>!c.defeated&&!c.carHit);for(let i=0;i<act.length;i++)for(let j=i+1;j<act.length;j++){const a=act[i],b=act[j];let ox=b.x-a.x,oy=b.y-a.y,d=Math.hypot(ox,oy);if(d<COP_SEP){if(d<.01){ox=1;oy=0;d=1}const push=(COP_SEP-d)/2;a.x-=ox/d*push;a.y-=oy/d*push;b.x+=ox/d*push;b.y+=oy/d*push;for(const c of[a,b]){c.x=Math.max(45,Math.min(world.w-45,c.x));c.y=Math.max(45,Math.min(world.h-45,c.y))}}}}
+let copCaps=[],capInv=0;
 function capsUpdate(dt){capInv=Math.max(0,capInv-dt);if(!boss&&!bossClearedThisLevel){copCaps=[];return}for(const f of copCaps){f.x+=f.vx*dt;f.y+=f.vy*dt;f.life-=dt;f.rot+=dt*14;if(!f.hit&&Math.hypot(player.x-f.x,player.y-(f.y+15))<34){f.hit=true;if(levelGrace<=0&&capInv<=0){capInv=.6;bossFightHp=Math.max(0,bossFightHp-12);AudioFX.caught();toast('Мент '+f.who+' попал фуражкой · −12%',900,1);for(let k=0;k<6;k++)particles.push({x:f.x,y:f.y,vx:(Math.random()-.5)*160,vy:(Math.random()-.5)*160,life:.4});if(bossFightHp<=0){copCaps=[];if(boss)checkBossDeath();else showPoliceArrest()}}}}copCaps=copCaps.filter(f=>f.life>0&&!f.hit&&f.x>-50&&f.y>-50&&f.x<world.w+50&&f.y<world.h+50)}
 function drawCaps(){for(const f of copCaps){ctx.save();ctx.translate(f.x,f.y);ctx.fillStyle='#0004';ctx.beginPath();ctx.ellipse(0,22,16,5,0,0,Math.PI*2);ctx.fill();ctx.rotate(f.rot);ctx.fillStyle='#0d1f30';ctx.beginPath();ctx.ellipse(0,5,20,6,0,0,Math.PI*2);ctx.fill();ctx.fillStyle='#132b40';ctx.fillRect(-15,-8,30,11);ctx.fillStyle='#c0392b';ctx.fillRect(-15,0,30,3);ctx.fillStyle='#e7c65e';ctx.beginPath();ctx.arc(0,-3,3.5,0,Math.PI*2);ctx.fill();ctx.restore()}}
 function kmap(k){k=(k||'').toLowerCase();return({arrowup:'u',w:'u','ц':'u',arrowdown:'d',s:'d','ы':'d',arrowleft:'l',a:'l','ф':'l',arrowright:'r',d:'r','в':'r'})[k]||''}function applyKeys(){if(state!=='play')return;joy.x=KEYS.r-KEYS.l;joy.y=KEYS.d-KEYS.u;if(joy.x||joy.y){facingAngle=Math.atan2(joy.y,joy.x);if(!aimActive)aimAngle=facingAngle}}
@@ -482,13 +500,13 @@ for(let c of cops){
   if(dist<52){c.stun=1.2;score+=0;toast('Задержан '+(c.name||'беглец'));c.x=player.x+(Math.random()<.5?-1:1)*300;c.y=player.y+(Math.random()<.5?-1:1)*240;if(cops.every(r=>Math.hypot(player.x-r.x,player.y-r.y)>180))toast('Беглецы разбежались — продолжай погоню')}
  }else{
   const finalCombat=!!boss||bossClearedThisLevel;
-  if(dist>(finalCombat?78:29)){c.x+=Math.cos(a)*chaseSpeed*dt;c.y+=Math.sin(a)*chaseSpeed*dt}
+  if(dist>(finalCombat?78:29)){const st=copSteer(c,dt,dist,dx*speed,dy*speed,chaseSpeed);c.x+=st.x*chaseSpeed*dt;c.y+=st.y*chaseSpeed*dt}
   if(finalCombat){c.capCd=(c.capCd??2)-dt;if(c.capCd<=0&&dist>120&&dist<620){const r=difficulty==='beginner'?[4.5,5.5]:difficulty==='pro'?[2.6,3.4]:[3.5,4.5];c.capCd=r[0]+Math.random()*(r[1]-r[0]);c.attackAnim=.4;const sp=difficulty==='pro'?300:difficulty==='beginner'?230:265;copCaps.push({x:c.x+Math.cos(a)*40,y:c.y-30+Math.sin(a)*40,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp,life:2.4,rot:0,who:c.name});AudioFX.bottle()}}
   if(finalCombat){if(dist<112&&c.attackCd<=0){c.attackAnim=.62;c.attackCd=1.12;if(levelGrace<=0)bossFightHp=Math.max(0,bossFightHp-12);AudioFX.caught();player.x-=Math.cos(a)*24;player.y-=Math.sin(a)*24;toast('Мент '+c.name+' бьёт дубинкой · −12%',900,1);if(bossFightHp<=0)showPoliceArrest()}}else if(dist<48&&Math.random()<dt*1.05){hp--;AudioFX.caught();player.x-=Math.cos(a)*35;player.y-=Math.sin(a)*35;toast('Мент '+c.name+' схватил тебя · −1 ❤',1000,1);if(hp<=0)showPoliceArrest()}
  }
  c.x=Math.max(45,Math.min(world.w-45,c.x));c.y=Math.max(45,Math.min(world.h-45,c.y));
 }
-if(state==='play')capsUpdate(dt);if(state!=='play')return;
+if(!policeMode)copSeparate();if(state==='play')capsUpdate(dt);if(state!=='play')return;
 for(let m of moneyBags){m.x+=m.vx*dt;m.y+=m.vy*dt;m.life-=dt}moneyBags=moneyBags.filter(m=>m.life>0);
 for(let p of particles){p.x+=p.vx*dt;p.y+=p.vy*dt;p.life-=dt}particles=particles.filter(p=>p.life>0);
 cam.x=Math.max(0,Math.min(world.w-W/zoom,player.x-W/(2*zoom)));cam.y=Math.max(0,Math.min(world.h-H/zoom,player.y-H/(2*zoom)));
