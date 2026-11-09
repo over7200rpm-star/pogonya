@@ -7,7 +7,7 @@ on:
 
 jobs:
   build:
-    name: Build Pogonya.apk (debug-signed)
+    name: Build Pogonya.apk (release-signed)
     runs-on: ubuntu-latest
     timeout-minutes: 40
 
@@ -20,13 +20,14 @@ jobs:
         with:
           node-version: 22
 
+      # Capacitor 8 + Android Gradle Plugin 8.13 want Java 21
       - name: Setup Java 21
         uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: 21
 
-      - name: Install Android SDK 36
+      - name: Install Android SDK 36 (Capacitor 8 uses API 36)
         run: |
           set +o pipefail
           SDKM="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
@@ -50,23 +51,48 @@ jobs:
       - name: Sync web files into Android project
         run: npx cap sync android
 
-      - name: Build debug APK (Gradle)
+      - name: Set version number (grows with every build)
+        run: |
+          GRADLE=android/app/build.gradle
+          sed -i -E "s/versionCode [0-9]+/versionCode ${{ github.run_number }}/" "$GRADLE"
+          grep -E "versionCode|versionName" "$GRADLE"
+
+      - name: Build release APK (Gradle)
         working-directory: android
         run: |
           set -o pipefail
           chmod +x ./gradlew
-          ./gradlew assembleDebug --no-daemon --stacktrace 2>&1 | tee ../gradle-build.log
+          ./gradlew assembleRelease --no-daemon --stacktrace 2>&1 | tee ../gradle-build.log
 
-      - name: Package Pogonya.apk
+      - name: Sign Pogonya.apk with the permanent key
+        env:
+          KS_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KS_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
         run: |
-          APK=$(find android/app/build/outputs/apk/debug -name "*.apk" | head -n 1)
+          if [ -z "$KS_B64" ] || [ -z "$KS_PASS" ]; then
+            echo "Secrets ANDROID_KEYSTORE_BASE64 / ANDROID_KEYSTORE_PASSWORD are missing"
+            exit 1
+          fi
+          echo "$KS_B64" | base64 -d > release.p12
+          APK=$(find android/app/build/outputs/apk/release -name "*.apk" | head -n 1)
           if [ -z "$APK" ]; then
             echo "APK not found. Contents of build outputs:"
             find android/app/build/outputs || true
             exit 1
           fi
-          cp "$APK" Pogonya.apk
+          BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -n 1)
+          "$BT/zipalign" -f -p 4 "$APK" aligned.apk
+          "$BT/apksigner" sign --ks release.p12 --ks-type PKCS12 --ks-key-alias pogonya \
+            --ks-pass env:KS_PASS --key-pass env:KS_PASS --out Pogonya.apk aligned.apk
+          rm -f release.p12 aligned.apk
+          "$BT/apksigner" verify --print-certs Pogonya.apk | head -n 5
           ls -l Pogonya.apk
+          AAPT2="$BT/aapt2"
+          if [ -x "$AAPT2" ]; then
+            "$AAPT2" dump badging Pogonya.apk | grep -iE "^package|sdkVersion|application-label:" | head -n 6 || true
+          fi
+          echo "--- game file inside apk ---"
+          unzip -l Pogonya.apk | grep "assets/public/index.html"
 
       - name: Upload Pogonya.apk
         uses: actions/upload-artifact@v7
@@ -83,3 +109,4 @@ jobs:
           name: build-log-android
           path: gradle-build.log
           if-no-files-found: ignore
+
