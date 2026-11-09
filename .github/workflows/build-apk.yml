@@ -51,12 +51,13 @@ jobs:
       - name: Sync web files into Android project
         run: npx cap sync android
 
-      - name: Put the game icon (app-icon.png) into the Android app
+      - name: Put the game icon (app-icon.png) and dark splash into the Android app
         run: |
           if [ ! -f app-icon.png ]; then echo "app-icon.png not found, keeping default icon"; exit 0; fi
           command -v convert >/dev/null || (sudo apt-get update -qq && sudo apt-get install -y -qq imagemagick)
           RES=android/app/src/main/res
-          rm -rf "$RES/mipmap-anydpi-v26"
+          BG="#17251C"
+          # legacy square icons (old Android)
           for pair in mdpi:48 hdpi:72 xhdpi:96 xxhdpi:144 xxxhdpi:192; do
             D=${pair%%:*}; S=${pair##*:}
             mkdir -p "$RES/mipmap-$D"
@@ -64,6 +65,35 @@ jobs:
             convert app-icon.png -resize ${S}x${S} "$RES/mipmap-$D/ic_launcher.png"
             cp "$RES/mipmap-$D/ic_launcher.png" "$RES/mipmap-$D/ic_launcher_round.png"
           done
+          # adaptive icon (Android 8+): picture fills the shape, no white frame
+          for pair in mdpi:108 hdpi:162 xhdpi:216 xxhdpi:324 xxxhdpi:432; do
+            D=${pair%%:*}; S=${pair##*:}; P=$((S*80/108))
+            convert -size ${S}x${S} xc:"$BG" \( app-icon.png -resize ${P}x${P} \) -gravity center -composite "$RES/mipmap-$D/ic_launcher_foreground.png"
+          done
+          rm -rf "$RES/mipmap-anydpi-v26"
+          mkdir -p "$RES/mipmap-anydpi-v26" "$RES/values"
+          for N in ic_launcher ic_launcher_round; do
+            printf '%s\n' '<?xml version="1.0" encoding="utf-8"?>' \
+              '<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">' \
+              '    <background android:drawable="@color/pogonya_icon_bg"/>' \
+              '    <foreground android:drawable="@mipmap/ic_launcher_foreground"/>' \
+              '</adaptive-icon>' > "$RES/mipmap-anydpi-v26/$N.xml"
+          done
+          rm -f "$RES/values/ic_launcher_background.xml"
+          printf '%s\n' '<?xml version="1.0" encoding="utf-8"?>' '<resources>' \
+            "    <color name=\"pogonya_icon_bg\">$BG</color>" '</resources>' > "$RES/values/pogonya_colors.xml"
+          # splash picture for old Android: icon on dark background
+          for F in $(find "$RES" -name "splash.png"); do
+            W=$(identify -format "%w" "$F"); H=$(identify -format "%h" "$F")
+            M=$(( W < H ? W : H )); P=$((M*55/100))
+            convert -size ${W}x${H} xc:"$BG" \( app-icon.png -resize ${P}x${P} \) -gravity center -composite "$F"
+          done
+          # splash background for Android 12+
+          STY="$RES/values/styles.xml"
+          if grep -q 'AppTheme.NoActionBarLaunch' "$STY" && ! grep -q windowSplashScreenBackground "$STY"; then
+            sed -i "/name=\"AppTheme.NoActionBarLaunch\"/a\        <item name=\"windowSplashScreenBackground\">$BG</item>" "$STY"
+          fi
+          cat "$STY"
           ls -l $RES/mipmap-*/
 
       - name: Set version number (grows with every build)
