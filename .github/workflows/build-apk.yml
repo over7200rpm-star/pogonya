@@ -51,6 +51,21 @@ jobs:
       - name: Sync web files into Android project
         run: npx cap sync android
 
+      - name: Put the game icon (app-icon.png) into the Android app
+        run: |
+          if [ ! -f app-icon.png ]; then echo "app-icon.png not found, keeping default icon"; exit 0; fi
+          command -v convert >/dev/null || (sudo apt-get update -qq && sudo apt-get install -y -qq imagemagick)
+          RES=android/app/src/main/res
+          rm -rf "$RES/mipmap-anydpi-v26"
+          for pair in mdpi:48 hdpi:72 xhdpi:96 xxhdpi:144 xxxhdpi:192; do
+            D=${pair%%:*}; S=${pair##*:}
+            mkdir -p "$RES/mipmap-$D"
+            rm -f "$RES/mipmap-$D"/ic_launcher*.png "$RES/mipmap-$D"/ic_launcher*.webp
+            convert app-icon.png -resize ${S}x${S} "$RES/mipmap-$D/ic_launcher.png"
+            cp "$RES/mipmap-$D/ic_launcher.png" "$RES/mipmap-$D/ic_launcher_round.png"
+          done
+          ls -l $RES/mipmap-*/
+
       - name: Set version number (grows with every build)
         run: |
           GRADLE=android/app/build.gradle
@@ -109,4 +124,3 @@ jobs:
           name: build-log-android
           path: gradle-build.log
           if-no-files-found: ignore
-
