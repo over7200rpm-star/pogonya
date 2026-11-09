@@ -43,6 +43,22 @@ jobs:
       - name: Sync web files into iOS project
         run: npx cap sync ios
 
+      - name: Put the game icon (app-icon.png) into the iOS app
+        run: |
+          if [ ! -f app-icon.png ]; then echo "app-icon.png not found, keeping default icon"; exit 0; fi
+          SET=ios/App/App/Assets.xcassets/AppIcon.appiconset
+          rm -f "$SET"/*.png
+          sips -s format png -z 1024 1024 app-icon.png --out "$SET/AppIcon-1024.png"
+          cat > "$SET/Contents.json" <<'JSON'
+          {
+            "images" : [
+              { "filename" : "AppIcon-1024.png", "idiom" : "universal", "platform" : "ios", "size" : "1024x1024" }
+            ],
+            "info" : { "author" : "xcode", "version" : 1 }
+          }
+          JSON
+          ls -l "$SET"
+
       - name: Resolve Swift packages (3 attempts)
         run: |
           for i in 1 2 3; do
